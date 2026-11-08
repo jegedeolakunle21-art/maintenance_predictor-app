@@ -2,16 +2,29 @@
 import streamlit as st
 import joblib
 import gdown
+import pandas as pd
 from pathlib import Path
+
+# ==========================================
+# CONFIGURATION
+# ==========================================
 
 BASE_DIR = Path(__file__).resolve().parent
 
 MODEL_PATH = Path("/tmp/machinery_predictive_maintenance_model.pkl")
-
 FEATURES_PATH = BASE_DIR / "machinery_model_features.pkl"
 
-# Your Google Drive model ID
 FILE_ID = "1zrg_NMzi3UNucRIX3T8G-bUvjkBwZHI3"
+
+st.set_page_config(
+    page_title="Machinery Predictive Maintenance",
+    page_icon="⚙️",
+    layout="wide"
+)
+
+# ==========================================
+# LOAD TRAINED MODEL
+# ==========================================
 
 @st.cache_resource
 def load_model():
@@ -28,7 +41,10 @@ def load_model():
             )
 
             if downloaded is None:
-                raise RuntimeError("Google Drive model download failed.")
+                raise RuntimeError(
+                    "Google Drive model download failed. "
+                    "Check that the file is publicly accessible."
+                )
 
     if not MODEL_PATH.exists():
         raise FileNotFoundError("Model file was not downloaded.")
@@ -36,21 +52,34 @@ def load_model():
     if MODEL_PATH.stat().st_size < 1_000_000:
         raise RuntimeError("Downloaded model appears incomplete.")
 
+    if not FEATURES_PATH.exists():
+        raise FileNotFoundError(
+            "machinery_model_features.pkl is missing from your GitHub repository."
+        )
+
     model = joblib.load(MODEL_PATH)
     features = joblib.load(FEATURES_PATH)
 
     return model, features
 
 
+# IMPORTANT: Close try/except BEFORE dashboard code
+
 try:
     model, features = load_model()
     st.success("Machinery predictive maintenance model loaded!")
-    
+
+except Exception as e:
+    st.error(f"Model loading failed: {e}")
+    st.stop()
+
+
 # ==========================================
 # MACHINERY PREDICTIVE MAINTENANCE DASHBOARD
 # ==========================================
 
 st.title("⚙️ Machinery Predictive Maintenance")
+
 st.subheader("AI-Based Equipment Health Monitoring")
 
 st.write(
@@ -61,7 +90,10 @@ st.write(
 
 st.divider()
 
-# Equipment selection
+# ==========================================
+# EQUIPMENT SELECTION
+# ==========================================
+
 equipment = st.selectbox(
     "Select Equipment",
     ["Centrifugal Pump", "Gas Turbine"]
@@ -87,6 +119,10 @@ fault = st.selectbox(
     "Observed Fault Mode",
     fault_modes
 )
+
+# ==========================================
+# OPERATING PARAMETERS
+# ==========================================
 
 st.header("Operating Parameters")
 
@@ -126,12 +162,18 @@ values = {}
 left, right = st.columns(2)
 
 for i, (name, default) in enumerate(defaults.items()):
+
     with (left if i % 2 == 0 else right):
+
         values[name] = st.number_input(
             name.replace("_", " ").title(),
             value=float(default),
             key=name
         )
+
+# ==========================================
+# DERIVED FEATURE
+# ==========================================
 
 suction = values["suction_pressure_bar"]
 
@@ -140,33 +182,49 @@ values["pressure_ratio"] = (
     if suction > 0 else 0
 )
 
-# Categorical feature encoding
+# ==========================================
+# CATEGORICAL FEATURE ENCODING
+# ==========================================
+
 for name in features:
 
     if name.startswith("equipment_type_"):
+
         values[name] = float(
             name == f"equipment_type_{equipment}"
         )
 
     elif name.startswith("fault_mode_"):
+
         category = name.replace("fault_mode_", "", 1)
+
         values[name] = float(category == fault)
 
-# Construct model input
-missing = [f for f in features if f not in values]
+# ==========================================
+# CONSTRUCT MODEL INPUT
+# ==========================================
+
+missing = [
+    feature for feature in features
+    if feature not in values
+]
 
 if missing:
-    st.error(f"Missing features: {missing}")
+
+    st.error(f"Missing model features: {missing}")
     st.stop()
 
 input_data = pd.DataFrame(
-    [[values[f] for f in features]],
+    [[values[feature] for feature in features]],
     columns=features
 )
 
 st.divider()
 
-# Prediction
+# ==========================================
+# PREDICTION
+# ==========================================
+
 if st.button(
     "RUN PREDICTIVE MAINTENANCE ASSESSMENT",
     type="primary",
@@ -174,6 +232,7 @@ if st.button(
 ):
 
     try:
+
         prediction = model.predict(input_data)[0]
 
         probabilities = model.predict_proba(input_data)[0]
@@ -183,15 +242,17 @@ if st.button(
         col1, col2 = st.columns(2)
 
         with col1:
+
             st.metric(
                 "Predicted Class",
                 str(prediction)
             )
 
         with col2:
+
             st.metric(
                 "Highest Probability",
-                f"{max(probabilities)*100:.2f}%"
+                f"{max(probabilities) * 100:.2f}%"
             )
 
         st.subheader("Prediction Probabilities")
@@ -231,7 +292,12 @@ if st.button(
         )
 
     except Exception as e:
+
         st.error(f"Prediction failed: {e}")
+
+# ==========================================
+# FOOTER
+# ==========================================
 
 st.divider()
 
@@ -239,8 +305,3 @@ st.caption(
     "Machinery Predictive Maintenance | "
     "Random Forest Classifier | Engineering Prototype"
 )
-
-
-except Exception as e:
-    st.error(f"Model loading failed: {e}")
-    st.stop()
